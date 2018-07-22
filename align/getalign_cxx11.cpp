@@ -1,8 +1,9 @@
 #include <cstddef>
 #include <cstdio>
+using namespace std;
 
 int
 main()
 {
-    std::printf("%zu\n", alignof(std::max_align_t));
+    printf("%zu\n", alignof(max_align_t));
 }

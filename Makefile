@@ -21,8 +21,9 @@ $(PROGRAM): $(OBJECTS)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $<
 
 align/getalign: align/getalign_cxx11.cpp align/getalign_gnuc.c
-	$(CXX) -std=c++11 align/getalign_cxx11.cpp -o $@ \
-		|| $(CC) align/getalign_gnuc.c -o $@
+	$(CC) -std=c11 align/getalign_c11.c -o $@ \
+		|| $(CC) align/getalign_gnuc.c -o $@ \
+		|| $(CXX) -std=c++11 align/getalign_cxx11.cpp -o $@
 
 clean:
 	$(RM) $(PROGRAM) $(OBJECTS) align/getalign
