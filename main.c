@@ -98,7 +98,7 @@ memshrink(Mapping *m, size_t newnmem)
     if (reclaim_len < pagesize) {
         return;
     }
-    if (m->reclaim_pages(m->addr + addr_off, reclaim_len) < 0) {
+    if (m->reclaim_pages((char *) m->addr + addr_off, reclaim_len) < 0) {
         perror("reclaim_pages");
         abort();
     }
@@ -122,7 +122,7 @@ DumbAllocData
 make_dumb_alloc_data(Mapping *m)
 {
     return (DumbAllocData) {
-        .mem = m->addr + ALIGN_TO_DUMB(sizeof(Preface)),
+        .mem = (char *) m->addr + ALIGN_TO_DUMB(sizeof(Preface)),
         .userdata = m,
         .setnmem = setnmem,
     };
