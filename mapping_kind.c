@@ -1,20 +1,25 @@
 #define _DEFAULT_SOURCE
 #include "mapping_kind.h"
 #include <fcntl.h>
+#include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/mman.h>
+#include <errno.h>
 
 static
 void *
 create_mapping_portable(size_t len)
 {
-    int fd = open("/dev/zero", O_RDWR);
+    const int fd = open("/dev/zero", O_RDWR);
     if (fd < 0) {
         perror("open: /dev/zero");
         abort();
     }
     void *r = mmap(NULL, len, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    const int saved_errno = errno;
+    close(fd);
+    errno = saved_errno;
     return r == MAP_FAILED ? NULL : r;
 }
 
