@@ -4,122 +4,160 @@
 #include "align.h"
 
 typedef struct {
-    size_t flag_n_sz;
-} Header;
-
-#define HDR_FLAG_MASK (SIZE_MAX / 2 + 1)
-
-#define HDR_ISUSED(H_) ((H_).flag_n_sz & HDR_FLAG_MASK)
-#define HDR_SZ(H_)     ((H_).flag_n_sz & ~HDR_FLAG_MASK)
-
-#define HDR_SETUSED(H_)   ((H_).flag_n_sz |= HDR_FLAG_MASK)
-#define HDR_SETUNUSED(H_) ((H_).flag_n_sz &= ~HDR_FLAG_MASK)
-
-#define HDR_INIT_USED(H_, Sz_) ((H_).flag_n_sz = (Sz_) | HDR_FLAG_MASK)
-
-typedef struct {
     size_t nmem;
 } Preface;
 
-static inline
-void *
-find_unused(void *hdr_first, void *hdr_last, size_t n)
+typedef struct {
+    size_t m;
+} Header;
+
+static const size_t UNUSED_MASK = 1;
+
+static
+size_t
+h_size_if_unused(Header h)
 {
-    for (char *p = hdr_first; p != hdr_last;) {
-        const Header h = *(Header *) p;
-        const size_t sz = HDR_SZ(h);
-        if (sz >= n && !HDR_ISUSED(h)) {
-            HDR_SETUSED(* (Header *) p);
-            return p + ALIGN_TO_DUMB(sizeof(Header));
-        }
-        p += ALIGN_TO_DUMB(sizeof(Header)) + sz;
-    }
-    return NULL;
+    return (h.m & UNUSED_MASK) ? (h.m & ~UNUSED_MASK) : 0;
+}
+
+static
+size_t
+h_size(Header h)
+{
+    return h.m & ~UNUSED_MASK;
+}
+
+static
+void
+h_mark_used(Header *h)
+{
+    h->m &= ~UNUSED_MASK;
+}
+
+static
+void
+h_mark_unused(Header *h)
+{
+    h->m |= UNUSED_MASK;
+}
+
+static
+Header
+h_create_used(size_t sz)
+{
+    return (Header) {.m = sz};
 }
 
 bool
 dumb_alloc_init(DumbAllocData d)
 {
-    if (!d.setnmem(d.userdata, 0, ALIGN_TO_DUMB(sizeof(Preface)))) {
+    const size_t initnmem = ALIGN_TO_DUMB(sizeof(Preface));
+
+    if (!d.setnmem(d.userdata, 0, initnmem))
         return false;
-    }
-    Preface *p = d.mem;
-    p->nmem = ALIGN_TO_DUMB(sizeof(Preface));
+
+    Preface p = {.nmem = initnmem};
+    memcpy(d.mem, &p, sizeof(p));
+
     return true;
 }
 
 void *
 dumb_malloc(DumbAllocData d, size_t n)
 {
-    if (!n) {
+    static const size_t HALF_ADDR_SPACE = (SIZE_MAX - ALIGN_TO_DUMB(sizeof(Header))) / 2;
+    if (!n || n > HALF_ADDR_SPACE)
         return NULL;
-    }
+
     n = ALIGN_TO_DUMB(n);
 
-    Preface *p = d.mem;
-    const size_t nmem = p->nmem;
-    char *last = ((char *) d.mem) + nmem;
+    Preface p;
+    memcpy(&p, d.mem, sizeof(p));
 
-    void *unused = find_unused(
-        ((char *) d.mem) + ALIGN_TO_DUMB(sizeof(Preface)),
-        last,
-        n);
-    if (unused) {
-        return unused;
+    char *last = ((char *) d.mem) + p.nmem;
+    char *cur = ((char *) d.mem) + ALIGN_TO_DUMB(sizeof(Preface));
+    while (cur != last) {
+        Header h;
+        memcpy(&h, cur, sizeof(h));
+
+        const size_t unused_sz = h_size_if_unused(h);
+        if (unused_sz >= n) {
+            h_mark_used(&h);
+            memcpy(cur, &h, sizeof(h));
+            return cur + ALIGN_TO_DUMB(sizeof(Header));
+        }
+
+        cur += ALIGN_TO_DUMB(sizeof(Header));
+        cur += h_size(h);
     }
 
-    const size_t newnmem = nmem + ALIGN_TO_DUMB(sizeof(Header)) + n;
-    if (!d.setnmem(d.userdata, nmem, newnmem)) {
+    const size_t newnmem = p.nmem + ALIGN_TO_DUMB(sizeof(Header)) + n;
+    if (newnmem > HALF_ADDR_SPACE)
         return NULL;
-    }
+    if (!d.setnmem(d.userdata, p.nmem, newnmem))
+        return NULL;
 
-    p->nmem = newnmem;
-    HDR_INIT_USED(*(Header *) last, n);
+    p.nmem = newnmem;
+    memcpy(d.mem, &p, sizeof(p));
+
+    Header h = h_create_used(n);
+    memcpy(last, &h, sizeof(h));
     return last + ALIGN_TO_DUMB(sizeof(Header));
 }
 
 void
 dumb_free(DumbAllocData d, void *block)
 {
-    if (!block) {
+    if (!block)
         return;
-    }
-    Header *ph = (Header *) (((char *) block) - ALIGN_TO_DUMB(sizeof(Header)));
-    HDR_SETUNUSED(*ph);
 
-    Preface *p = d.mem;
-    const size_t nmem = p->nmem;
-    const size_t nblock = HDR_SZ(*ph);
-    if (((char *) d.mem) + nmem == ((char *) block) + nblock) {
-        const size_t newnmem = nmem - nblock - ALIGN_TO_DUMB(sizeof(Header));
-        if (d.setnmem(d.userdata, nmem, newnmem)) {
-            p->nmem = newnmem;
+    void *hdr_addr = ((char *) block) - ALIGN_TO_DUMB(sizeof(Header));
+
+    Header h;
+    memcpy(&h, hdr_addr, sizeof(h));
+    const size_t block_size = h_size(h);
+
+    Preface p;
+    memcpy(&p, d.mem, sizeof(p));
+    if (
+            ((char *) d.mem) + p.nmem ==
+            ((char *) block) + block_size)
+    {
+        const size_t newnmem = p.nmem - block_size - ALIGN_TO_DUMB(sizeof(Header));
+        if (d.setnmem(d.userdata, p.nmem, newnmem)) {
+            p.nmem = newnmem;
+            memcpy(d.mem, &p, sizeof(p));
         }
+
+    } else {
+        h_mark_unused(&h);
+        memcpy(hdr_addr, &h, sizeof(h));
     }
 }
 
 void *
 dumb_realloc(DumbAllocData d, void *block, size_t n)
 {
-    if (!block) {
+    if (!block)
         return dumb_malloc(d, n);
-    }
+
     if (!n) {
         dumb_free(d, block);
         return NULL;
     }
 
-    const Header h = * (Header *) (((char *) block) - ALIGN_TO_DUMB(sizeof(Header)));
-    const size_t oldn = HDR_SZ(h);
-    if (oldn >= n) {
-        return block;
-    }
+    void *hdr_addr = ((char *) block) - ALIGN_TO_DUMB(sizeof(Header));
+    Header h;
+    memcpy(&h, hdr_addr, sizeof(h));
+    const size_t block_size = h_size(h);
 
-    void *ret = dumb_malloc(d, n);
-    if (!ret) {
+    if (block_size >= n)
+        return block;
+
+    void *r = dumb_malloc(d, n);
+    if (!r)
         return NULL;
-    }
-    memcpy(ret, block, oldn);
+    memcpy(r, block, block_size);
     dumb_free(d, block);
-    return ret;
+    return r;
 }

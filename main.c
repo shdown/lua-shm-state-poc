@@ -3,6 +3,7 @@
 #include "mapping_kind.h"
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <errno.h>
 #include <stdbool.h>
@@ -22,9 +23,8 @@ static
 void
 pth_check_impl(int ret, const char *expr, const char *file, int line)
 {
-    if (ret == 0) {
+    if (ret == 0)
         return;
-    }
     fprintf(stderr, "PTH_CHECK(%s) failed at %s:%d: %s\n", expr, file, line, strerror(ret));
     abort();
 }
@@ -34,7 +34,7 @@ pth_check_impl(int ret, const char *expr, const char *file, int line)
 typedef struct {
     pthread_mutex_t mtx;
     pthread_cond_t cond;
-    bool parentsturn;
+    char parentsturn;
 } Preface;
 
 static
@@ -51,14 +51,14 @@ preface_init(Preface *p)
     PTH_CHECK(pthread_condattr_setpshared(&cond_attr, PTHREAD_PROCESS_SHARED));
     PTH_CHECK(pthread_cond_init(&p->cond, &cond_attr));
 
-    p->parentsturn = true;
+    p->parentsturn = 1;
 }
 
 //------------------------------------------------------------------------------
 
 static size_t pagesize;
 
-static inline
+static
 void
 memmgr_init(void)
 {
@@ -80,24 +80,27 @@ typedef struct {
     int (*reclaim_pages)(void *addr, size_t len);
 } Mapping;
 
-static inline
+static
 void
 memshrink(Mapping *m, size_t newnmem)
 {
-    if (!m->reclaim_pages) {
+    if (!m->reclaim_pages)
         return;
-    }
+
+    // Prevent overflow.
+    if (newnmem > SIZE_MAX - pagesize)
+        return;
 
     const size_t addr_off = ALIGN_TO(newnmem, pagesize);
 
     const size_t len = m->len;
-    if (addr_off > len) {
+    if (addr_off > len)
         return;
-    }
+
     const size_t reclaim_len = len - addr_off;
-    if (reclaim_len < pagesize) {
+    if (reclaim_len < pagesize)
         return;
-    }
+
     if (m->reclaim_pages((char *) m->addr + addr_off, reclaim_len) < 0) {
         perror("reclaim_pages");
         abort();
@@ -117,7 +120,7 @@ setnmem(void *userdata, size_t oldnmem, size_t newnmem)
     }
 }
 
-static inline
+static
 DumbAllocData
 make_dumb_alloc_data(Mapping *m)
 {
@@ -150,9 +153,8 @@ static
 bool
 check_lua_error(lua_State *L, int ret)
 {
-    if (ret == 0) {
+    if (ret == 0)
         return true;
-    }
     fprintf(stderr, "Lua: %s\n", get_lua_errmsg(L, -1));
     return false;
 }
@@ -183,12 +185,11 @@ l_sleep(lua_State *L)
 
     struct timespec rem;
     int r;
-    while ((r = nanosleep(&req, &rem)) < 0 && errno == EINTR) {
+    while ((r = nanosleep(&req, &rem)) < 0 && errno == EINTR)
         req = rem;
-    }
-    if (r < 0) {
+
+    if (r < 0)
         perror("nanosleep");
-    }
     return 0;
 }
 
@@ -209,7 +210,7 @@ inject_lib(lua_State *L)
 
 //------------------------------------------------------------------------------
 
-static volatile int sibling;
+static pid_t sibling;
 
 static
 void
@@ -242,13 +243,12 @@ signals_setup(void)
     }
 }
 
-static inline
+static
 void
 signals_onfork(pid_t res)
 {
-    if (res > 0) {
+    if (res > 0)
         sibling = res;
-    }
 }
 
 //------------------------------------------------------------------------------
@@ -260,9 +260,8 @@ parse_mapping_len(const char *arg)
     char *endptr;
     errno = 0;
     size_t r = strtoull(arg, &endptr,  10);
-    if (errno || endptr == arg) {
+    if (errno || endptr == arg)
         return 0;
-    }
     switch (*endptr) {
     case 'G':
         r *= 1024;
@@ -309,11 +308,15 @@ main(int argc, char **argv)
     MappingKind m_kind = *mapping_kind_pdefault;
     Mapping m = {.len = 0};
 
-    for (int c; (c = getopt(argc, argv, "n:po")) != -1; ) {
+    for (int c; (c = getopt(argc, argv, "n:po")) != -1;) {
         switch (c) {
             case 'n':
                 if (!(m.len = parse_mapping_len(optarg))) {
                     fprintf(stderr, "E: invalid mapping length.\n");
+                    usage();
+                }
+                if (m.len > SIZE_MAX / 2) {
+                    fprintf(stderr, "E: mapping length is too big.\n");
                     usage();
                 }
                 break;
@@ -336,14 +339,16 @@ main(int argc, char **argv)
         return 1;
     }
     m.reclaim_pages = m_kind.reclaim_pages;
-    if (!m.len) {
+
+    if (!m.len)
         m.len = m_kind.default_len;
-    }
     m.len += ALIGN_TO_DUMB(sizeof(Preface));
+
     if (!(m.addr = m_kind.create(m.len))) {
         perror("mmap");
         return 1;
     }
+
     Preface *preface = m.addr;
     preface_init(preface);
     if (!dumb_alloc_init(make_dumb_alloc_data(&m))) {
@@ -374,15 +379,15 @@ main(int argc, char **argv)
     }
     signals_onfork(pid);
 
-    bool isparent;
+    char isparent;
     const char *funcname;
     if (pid) {
         // parent
-        isparent = true;
+        isparent = 1;
         funcname = "f";
     } else {
         // child
-        isparent = false;
+        isparent = 0;
         funcname = "g";
     }
     while (1) {
