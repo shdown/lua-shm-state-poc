@@ -7,6 +7,12 @@
 #include <sys/mman.h>
 #include <errno.h>
 
+enum {
+    Kb = 1024,
+    Mb = 1024 * Kb,
+    Gb = 1024 * Mb,
+};
+
 static
 void *
 create_mapping_portable(size_t len)
@@ -42,12 +48,19 @@ punch_hole(void *addr, size_t len)
 #endif
 
 const MappingKind MAPPING_KIND_PORTABLE = {
-    .default_len = 1024ull * 1024 * 16,
+    .default_len = 16 * Mb,
     .create = create_mapping_portable,
 };
 
 const MappingKind MAPPING_KIND_ONDEMAND = {
-    .default_len = 1024ull * 1024 * 1024 * 16,
+#if UINTPTR_MAX == 0xffffffffffffffffULL
+    // 64-bit system
+    .default_len = 16ULL * Gb,
+#else
+    // 32-bit system (or lesser, which we don't support)
+    .default_len = Gb,
+#endif
+
 #ifdef __linux__
     .create = create_mapping_ondemand,
     .reclaim_pages = punch_hole,
