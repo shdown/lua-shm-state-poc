@@ -12,7 +12,6 @@
 #include <lualib.h>
 #include <pthread.h>
 #include <unistd.h>
-#include <signal.h>
 #include <time.h>
 
 //------------------------------------------------------------------------------
@@ -208,51 +207,6 @@ inject_lib(lua_State *L)
     lua_setglobal(L, "shm_poc"); // L: -
 }
 
-//------------------------------------------------------------------------------
-
-static pid_t sibling;
-
-static
-void
-handle_signal(int signo)
-{
-    int saved_errno = errno;
-    kill(sibling, signo);
-    raise(signo);
-    errno = saved_errno;
-}
-
-static
-void
-signals_setup(void)
-{
-    sibling = getpid();
-
-    struct sigaction siga = {.sa_handler = handle_signal, .sa_flags = SA_RESETHAND};
-    if (sigemptyset(&siga.sa_mask) < 0) {
-        perror("sigemptyset");
-        abort();
-    }
-    if (sigaction(SIGHUP, &siga, NULL) < 0 ||
-        sigaction(SIGINT, &siga, NULL) < 0 ||
-        sigaction(SIGQUIT, &siga, NULL) < 0 ||
-        sigaction(SIGTERM, &siga, NULL) < 0)
-    {
-        perror("sigaction");
-        abort();
-    }
-}
-
-static
-void
-signals_onfork(pid_t res)
-{
-    if (res > 0)
-        sibling = res;
-}
-
-//------------------------------------------------------------------------------
-
 static
 size_t
 parse_mapping_len(const char *arg)
@@ -370,14 +324,11 @@ main(int argc, char **argv)
         return 1;
     }
 
-    signals_setup();
-
     pid_t pid = fork();
     if (pid < 0) {
         perror("fork");
         return 1;
     }
-    signals_onfork(pid);
 
     char isparent;
     const char *funcname;
