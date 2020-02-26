@@ -18,7 +18,7 @@ thanks to the [overcommit feature](https://www.kernel.org/doc/Documentation/vm/o
 which tells Linux to only allocate physical pages on demand (this does *not* depend on which overcommit policy your system is configured to use), we can only pay for what we use,
 and not a page more. And with [`madvise(..., MADV_REMOVE)`](http://man7.org/linux/man-pages/man2/madvise.2.html), we can reclaim the pages we don’t need anymore. Yay!
 
-On Linux, this PoC goes on to allocate 16 Gb of *virtual* memory. Because this ought to be enough for anybody.
+On Linux, this PoC goes on to allocate 16 Gb of *virtual* memory *(1 Gb on 32-bit systems)*. Because this ought to be enough for anybody.
 If your virtual memory is, in some reason, limited, run it as `./main -p`, which forces it to fall back to a portable 16 Mb mapping.
 
 Caveats
