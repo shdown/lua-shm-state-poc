@@ -310,7 +310,12 @@ main(int argc, char **argv)
         return 1;
     }
 
-    lua_State *L = lua_newstate(l_realloc, &m);
+    lua_State *L = lua_newstate(
+        l_realloc, &m
+#if LUA_VERSION_NUM >= 505
+        , rand()
+#endif
+    );
     if (!L) {
         fprintf(stderr, "E: lua_newstate() failed (out of memory?)\n");
         return 1;
