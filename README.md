@@ -11,7 +11,7 @@ The only things left are to create a shared memory mapping and implement an allo
 
 This is more or less safe as long as Lua knows nothing about parallelism. Some things in the standard library do know, though; see the “Caveats” section.
 
-On systems other that Linux, shared memory mappings have to be of fixed size; by default, this PoC allocates 16 Mb on these systems.
+On systems other than Linux, shared memory mappings have to be of fixed size; by default, this PoC allocates 16 Mb on these systems.
 
 In fact, Linux shared memory mappings also have to be of fixed “size” — of fixed *virtual size*:
 thanks to the [overcommit feature](https://www.kernel.org/doc/Documentation/vm/overcommit-accounting) and the [`MAP_NORESERVE`](http://man7.org/linux/man-pages/man2/mmap.2.html) `mmap` flag,
